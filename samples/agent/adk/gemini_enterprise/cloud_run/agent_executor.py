@@ -30,7 +30,7 @@ from a2a.utils import (
     new_task,
 )
 from a2a.utils.errors import ServerError
-from a2ui.a2a.extension import try_activate_a2ui_extension
+from a2ui.a2a import try_activate_a2ui_extension
 from agent import ContactAgent
 
 logger = logging.getLogger(__name__)
@@ -51,8 +51,12 @@ class ContactAgentExecutor(AgentExecutor):
     ui_event_part = None
     action = None
 
-    logger.info(f"--- Client requested extensions: {context.requested_extensions} ---")
-    active_ui_version = try_activate_a2ui_extension(context, self._agent.agent_card)
+    logger.info(
+        f"--- Client requested extensions: {context.requested_extensions} ---"
+    )
+    active_ui_version = try_activate_a2ui_extension(
+        context, self._agent.agent_card
+    )
 
     if active_ui_version:
       logger.info(
@@ -61,7 +65,8 @@ class ContactAgentExecutor(AgentExecutor):
       )
     else:
       logger.info(
-          "--- AGENT_EXECUTOR: A2UI extension is not active. Using text runner. ---"
+          "--- AGENT_EXECUTOR: A2UI extension is not active. Using text"
+          " runner. ---"
       )
 
     if context.message and context.message.parts:
