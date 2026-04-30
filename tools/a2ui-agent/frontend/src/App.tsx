@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, FormEvent } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, FormEvent } from 'react';
 import {
   A2uiSurface,
   basicCatalog,
@@ -11,16 +11,36 @@ import {
   ReactComponentImplementation,
 } from '@a2ui/web_core/v0_9';
 import { renderMarkdown } from '@a2ui/markdown-it';
-import { AgentClient } from './agent-client';
+import { AgentClient, ChatResponse } from './agent-client';
+
+type ActionPayload = {
+  name: string;
+  surfaceId: string;
+  sourceComponentId: string;
+  context: Record<string, unknown>;
+};
+
+function processA2UI(
+  response: ChatResponse,
+  client: AgentClient,
+  processor: MessageProcessor<ReactComponentImplementation>,
+): { msgs: A2uiClientMessage[]; kinds: string[] } {
+  const a2uiMsgs = client.extractA2UIMessages(response);
+  if (a2uiMsgs.length === 0) return { msgs: [], kinds: [] };
+  const seen = new Map<string, A2uiClientMessage>();
+  for (const msg of a2uiMsgs) {
+    const kind = Object.keys(msg).find((k) => k !== 'version') || '';
+    const payload = (msg as Record<string, unknown>)[kind] as Record<string, unknown> | undefined;
+    const surfaceId = (payload?.surfaceId as string) || 'default';
+    seen.set(`${kind}:${surfaceId}`, msg);
+  }
+  const deduped = Array.from(seen.values());
+  try { processor.processMessages(deduped); } catch (err) { console.warn('processMessages error:', err); }
+  return { msgs: deduped, kinds: deduped.map((m) => Object.keys(m).find((k) => k !== 'version') || 'unknown') };
+}
 
 export function App() {
   const client = useMemo(() => new AgentClient(), []);
-
-  const processor = useMemo(() => {
-    return new MessageProcessor<ReactComponentImplementation>([basicCatalog], (action) => {
-      console.log('User action:', action);
-    });
-  }, []);
 
   const [sessionId, setSessionId] = useState<string>('');
   const [loading, setLoading] = useState(false);
@@ -28,22 +48,46 @@ export function App() {
   const [input, setInput] = useState('创建一个登录表单，包含用户名、密码输入框和提交按钮');
   const [agentText, setAgentText] = useState('');
   const [toolCalls, setToolCalls] = useState<string[]>([]);
-  const [surfaces, setSurfaces] = useState<
-    SurfaceModel<ReactComponentImplementation>[]
-  >([]);
+  const [surfaces, setSurfaces] = useState<SurfaceModel<ReactComponentImplementation>[]>([]);
+
+  // Refs to avoid circular deps between processor and handleAction
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
+  const actionHandlerRef = useRef<(action: ActionPayload) => void>(() => {});
+
+  const processor = useMemo(() => {
+    return new MessageProcessor<ReactComponentImplementation>([basicCatalog], (action: ActionPayload) => {
+      actionHandlerRef.current(action);
+    });
+  }, []);
 
   useEffect(() => {
-    const sub1 = processor.onSurfaceCreated((surface) => {
-      setSurfaces((prev) => [...prev, surface]);
-    });
-    const sub2 = processor.onSurfaceDeleted((id) => {
-      setSurfaces((prev) => prev.filter((s) => s.id !== id));
-    });
-    return () => {
-      sub1.unsubscribe();
-      sub2.unsubscribe();
-    };
+    const sub1 = processor.onSurfaceCreated((surface: SurfaceModel<ReactComponentImplementation>) => setSurfaces((prev) => [...prev, surface]));
+    const sub2 = processor.onSurfaceDeleted((id: string) => setSurfaces((prev) => prev.filter((s) => s.id !== id)));
+    return () => { sub1.unsubscribe(); sub2.unsubscribe(); };
   }, [processor]);
+
+  // Action handler: sends user action back to agent
+  useEffect(() => {
+    actionHandlerRef.current = async (action: ActionPayload) => {
+      console.log('User action:', action);
+      const actionMsg = `[用户操作] event: ${action.name}, component: ${action.sourceComponentId}, data: ${JSON.stringify(action.context)}`;
+      setInput(actionMsg);
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await client.chat(actionMsg, sessionIdRef.current || undefined);
+        setSessionId(response.session_id);
+        setAgentText(response.text);
+        const { kinds } = processA2UI(response, client, processor);
+        setToolCalls(kinds);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setLoading(false);
+      }
+    };
+  }, [client, processor]);
 
   const handleSubmit = useCallback(
     async (e: FormEvent) => {
@@ -56,45 +100,21 @@ export function App() {
       setToolCalls([]);
       setSurfaces([]);
 
-      // Clear existing surfaces
-      Array.from(processor.model.surfacesMap.keys()).forEach((id) => {
-        processor.model.deleteSurface(id);
-      });
+      Array.from(processor.model.surfacesMap.keys()).forEach((id) => processor.model.deleteSurface(id));
 
       try {
-        const response = await client.chat(input, sessionId || undefined);
+        const response = await client.chat(input, sessionIdRef.current || undefined);
         setSessionId(response.session_id);
         setAgentText(response.text);
-
-        // Process A2UI messages — deduplicate and handle errors gracefully
-        const a2uiMsgs = client.extractA2UIMessages(response);
-        if (a2uiMsgs.length > 0) {
-          // Deduplicate: keep only the last createSurface for each surfaceId,
-          // and the last updateComponents for each surfaceId
-          const seen = new Map<string, A2uiClientMessage>();
-          for (const msg of a2uiMsgs) {
-            const kind = Object.keys(msg).find((k) => k !== 'version') || '';
-            const payload = (msg as Record<string, unknown>)[kind] as Record<string, unknown> | undefined;
-            const surfaceId = payload?.surfaceId as string || 'default';
-            const key = `${kind}:${surfaceId}`;
-            seen.set(key, msg);
-          }
-          const deduped = Array.from(seen.values());
-
-          try {
-            processor.processMessages(deduped);
-          } catch (err) {
-            console.warn('processMessages error (non-fatal):', err);
-          }
-          setToolCalls(deduped.map((m) => Object.keys(m).find((k) => k !== 'version') || 'unknown'));
-        }
+        const { kinds } = processA2UI(response, client, processor);
+        setToolCalls(kinds);
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         setLoading(false);
       }
     },
-    [input, loading, sessionId, client, processor]
+    [input, loading, client, processor],
   );
 
   const handleNewSession = useCallback(() => {
@@ -102,9 +122,7 @@ export function App() {
     setAgentText('');
     setToolCalls([]);
     setError(null);
-    Array.from(processor.model.surfacesMap.keys()).forEach((id) => {
-      processor.model.deleteSurface(id);
-    });
+    Array.from(processor.model.surfacesMap.keys()).forEach((id) => processor.model.deleteSurface(id));
     setSurfaces([]);
   }, [processor]);
 
@@ -126,7 +144,6 @@ export function App() {
         </header>
 
         <div className="layout">
-          {/* Left panel: controls */}
           <aside className="panel">
             <form className="chat-form" onSubmit={handleSubmit}>
               <textarea
@@ -162,7 +179,6 @@ export function App() {
             )}
           </aside>
 
-          {/* Right panel: A2UI rendered output */}
           <main className="render-area">
             {loading && (
               <div className="loading">

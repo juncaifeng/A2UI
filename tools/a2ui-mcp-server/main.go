@@ -20,12 +20,16 @@ func main() {
 	specDir := flag.String("spec", defaultSpecDir(), "path to specification/v0_9/json directory")
 	flag.Parse()
 
-	// Load catalog
-	cat, err := catalog.Load(*specDir)
+	// Load all catalogs
+	catalogs, err := catalog.LoadAll(*specDir)
 	if err != nil {
-		log.Fatalf("Failed to load catalog: %v", err)
+		log.Fatalf("Failed to load catalogs: %v", err)
 	}
-	log.Printf("Loaded %d components from catalog", len(cat.Components))
+	for _, cat := range catalogs {
+		log.Printf("Catalog %q: %d components", cat.CatalogID, len(cat.Components))
+	}
+	cat := catalog.MergeCatalogs(catalogs)
+	log.Printf("Merged %d catalogs: %d total components", len(catalogs), len(cat.Components))
 
 	store := session.NewStore()
 	builder := a2ui.NewBuilder()

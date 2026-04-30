@@ -347,3 +347,173 @@ func parseFunction(name string, raw json.RawMessage) (*FunctionDef, error) {
 
 	return fn, nil
 }
+
+// LoadFromCatalogFile loads a single catalog from a catalog file path,
+// resolving common_types.json relative to the catalog's $ref paths.
+func LoadFromCatalogFile(catalogPath string) (*Catalog, error) {
+	catalogData, err := os.ReadFile(catalogPath)
+	if err != nil {
+		return nil, fmt.Errorf("read catalog: %w", err)
+	}
+
+	var rawCatalog map[string]json.RawMessage
+	if err := json.Unmarshal(catalogData, &rawCatalog); err != nil {
+		return nil, fmt.Errorf("parse catalog: %w", err)
+	}
+
+	// Find the common_types.json path by looking at the first $ref
+	commonPath := findCommonTypesPath(rawCatalog, catalogPath)
+	if commonPath == "" {
+		// No $ref to common_types.json; catalog may be self-contained
+		commonPath = filepath.Join(filepath.Dir(catalogPath), "common_types.json")
+	}
+
+	commonDefs := map[string]json.RawMessage{}
+	if data, err := os.ReadFile(commonPath); err == nil {
+		var rawCommon map[string]json.RawMessage
+		if err := json.Unmarshal(data, &rawCommon); err == nil {
+			commonDefs = parseDefs(rawCommon)
+		}
+	}
+
+	// Parse catalog ID
+	var catalogID string
+	if raw, ok := rawCatalog["catalogId"]; ok {
+		_ = json.Unmarshal(raw, &catalogID)
+	}
+
+	// Parse components
+	var rawComponents map[string]json.RawMessage
+	if raw, ok := rawCatalog["components"]; ok {
+		_ = json.Unmarshal(raw, &rawComponents)
+	}
+
+	components := make(map[string]*ComponentDef, len(rawComponents))
+	for name, rawComp := range rawComponents {
+		comp, err := parseComponent(name, rawComp, commonDefs)
+		if err != nil {
+			return nil, fmt.Errorf("parse component %s: %w", name, err)
+		}
+		components[name] = comp
+	}
+
+	// Parse functions (optional)
+	functions := make(map[string]*FunctionDef)
+	if raw, ok := rawCatalog["functions"]; ok {
+		var rawFuncs map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &rawFuncs)
+		for name, rawFunc := range rawFuncs {
+			fn, err := parseFunction(name, rawFunc)
+			if err == nil {
+				functions[name] = fn
+			}
+		}
+	}
+
+	return &Catalog{
+		Components: components,
+		Functions:  functions,
+		CatalogID:  catalogID,
+	}, nil
+}
+
+// LoadAll scans specDir recursively for *_catalog.json files and loads each one.
+func LoadAll(specDir string) ([]*Catalog, error) {
+	var catalogPaths []string
+	err := filepath.Walk(specDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // skip errors
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if strings.HasSuffix(info.Name(), "_catalog.json") {
+			catalogPaths = append(catalogPaths, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scan for catalog files: %w", err)
+	}
+
+	if len(catalogPaths) == 0 {
+		return nil, fmt.Errorf("no *_catalog.json files found in %s", specDir)
+	}
+
+	var catalogs []*Catalog
+	for _, path := range catalogPaths {
+		cat, err := LoadFromCatalogFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("load %s: %w", path, err)
+		}
+		catalogs = append(catalogs, cat)
+	}
+
+	return catalogs, nil
+}
+
+// findCommonTypesPath searches the catalog JSON for a $ref referencing
+// common_types.json and returns the resolved absolute path.
+// It looks for patterns like "../../common_types.json#/$defs/..." or
+// "common_types.json#/$defs/...".
+func findCommonTypesPath(rawCatalog map[string]json.RawMessage, catalogPath string) string {
+	// Search components for $ref patterns
+	var rawComponents map[string]json.RawMessage
+	if raw, ok := rawCatalog["components"]; ok {
+		_ = json.Unmarshal(raw, &rawComponents)
+	}
+
+	for _, rawComp := range rawComponents {
+		if path := findRefInValue(rawComp, catalogPath); path != "" {
+			return path
+		}
+	}
+	return ""
+}
+
+// findRefInValue recursively searches a JSON value for a $ref containing "common_types.json".
+func findRefInValue(raw json.RawMessage, catalogPath string) string {
+	var val any
+	if err := json.Unmarshal(raw, &val); err != nil {
+		return ""
+	}
+	return searchForCommonRef(val, catalogPath)
+}
+
+func searchForCommonRef(val any, catalogPath string) string {
+	switch v := val.(type) {
+	case map[string]any:
+		if ref, ok := v["$ref"].(string); ok {
+			if resolved := resolveCommonTypesPath(ref, catalogPath); resolved != "" {
+				return resolved
+			}
+		}
+		for _, child := range v {
+			if result := searchForCommonRef(child, catalogPath); result != "" {
+				return result
+			}
+		}
+	case []any:
+		for _, child := range v {
+			if result := searchForCommonRef(child, catalogPath); result != "" {
+				return result
+			}
+		}
+	}
+	return ""
+}
+
+// resolveCommonTypesPath resolves a $ref like "../../common_types.json#/$defs/DynamicString"
+// to an absolute file path.
+func resolveCommonTypesPath(ref string, catalogPath string) string {
+	// Split at # to get the file part
+	filePart := strings.SplitN(ref, "#", 2)[0]
+	if filePart == "" || !strings.Contains(filePart, "common_types.json") {
+		return ""
+	}
+	// Resolve relative to catalog file directory
+	catalogDir := filepath.Dir(catalogPath)
+	absPath := filepath.Join(catalogDir, filePart)
+	// Clean path (resolve ../ etc.)
+	return filepath.Clean(absPath)
+}

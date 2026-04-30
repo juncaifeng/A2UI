@@ -56,3 +56,36 @@ func (c *ComponentDef) IsRequired(propName string) bool {
 	}
 	return false
 }
+
+// MergeCatalogs combines multiple catalogs into a single Catalog.
+// Later catalogs override earlier ones when component names collide.
+// Functions are merged similarly.
+func MergeCatalogs(catalogs []*Catalog) *Catalog {
+	merged := &Catalog{
+		Components: make(map[string]*ComponentDef),
+		Functions:  make(map[string]*FunctionDef),
+	}
+
+	var catalogIDs []string
+	for _, cat := range catalogs {
+		if cat.CatalogID != "" {
+			catalogIDs = append(catalogIDs, cat.CatalogID)
+		}
+		for name, comp := range cat.Components {
+			merged.Components[name] = comp
+		}
+		for name, fn := range cat.Functions {
+			merged.Functions[name] = fn
+		}
+	}
+
+	// Store all catalog IDs separated by comma
+	if len(catalogIDs) > 0 {
+		merged.CatalogID = catalogIDs[0]
+		for _, id := range catalogIDs[1:] {
+			merged.CatalogID += "," + id
+		}
+	}
+
+	return merged
+}

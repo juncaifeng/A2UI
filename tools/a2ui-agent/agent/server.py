@@ -143,14 +143,14 @@ class AgentServicer(agent_pb2_grpc.AgentServiceServicer):
 
             graph = await create_graph(tools, cfg)
 
-            logger.info("Invoking agent (timeout=120s)...")
+            logger.info("Invoking agent (timeout=300s)...")
             try:
                 result = await asyncio.wait_for(
                     graph.ainvoke({"messages": self.sessions[session_id]}),
-                    timeout=120,
+                    timeout=300,
                 )
             except asyncio.TimeoutError:
-                logger.error("Agent invocation TIMED OUT after 120s")
+                logger.error("Agent invocation TIMED OUT after 300s")
                 return agent_pb2.ChatResponse(
                     session_id=session_id,
                     text="Agent timed out. The LLM or MCP server may be slow.",

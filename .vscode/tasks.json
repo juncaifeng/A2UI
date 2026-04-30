@@ -1,19 +1,139 @@
 {
-    // See https://go.microsoft.com/fwlink/?LinkId=733558
-    // for the documentation about the tasks.json format
-    "version": "2.0.0",
-    "tasks": [
-        {
-            // To run a shell script, open it and press ⇧⌘B.
-            // See https://code.visualstudio.com/docs/debugtest/tasks
-            "label": "currently opened shell script",
-            "type": "shell",
-            "command": "/bin/bash ${file}",
-            "problemMatcher": [],
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            }
-        }
-    ]
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "currently opened shell script",
+      "type": "shell",
+      "command": "/bin/bash ${file}",
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+
+    // ── A2UI Agent Tasks ──────────────────────────────────────
+
+    {
+      "label": "Build: MCP Server (Go)",
+      "detail": "编译 a2ui-mcp-server",
+      "type": "shell",
+      "command": "go build -o a2ui-mcp-server.exe .",
+      "options": {
+        "cwd": "${workspaceFolder}/tools/a2ui-mcp-server"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "problemMatcher": ["$go"]
+    },
+    {
+      "label": "Build: Agent Gateway (Go)",
+      "detail": "编译 grpc-gateway",
+      "type": "shell",
+      "command": "go build -o gateway.exe .",
+      "options": {
+        "cwd": "${workspaceFolder}/tools/a2ui-agent/gateway"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "problemMatcher": ["$go"]
+    },
+    {
+      "label": "Build: All Go",
+      "detail": "编译 MCP Server + Gateway",
+      "dependsOn": [
+        "Build: MCP Server (Go)",
+        "Build: Agent Gateway (Go)"
+      ],
+      "dependsOrder": "sequence",
+      "group": "build",
+      "problemMatcher": []
+    },
+    {
+      "label": "Agent: Generate Proto Stubs",
+      "detail": "从 .proto 生成 Python + Go gRPC 代码",
+      "type": "shell",
+      "command": "uv run generate",
+      "options": {
+        "cwd": "${workspaceFolder}/tools/a2ui-agent"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "MCP Server (Go)",
+      "detail": "A2UI MCP Server — 端口 8080",
+      "type": "shell",
+      "command": "go run . --addr localhost:8080 --spec ${workspaceFolder}/specification/v0_9/json",
+      "options": {
+        "cwd": "${workspaceFolder}/tools/a2ui-mcp-server"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "group": "a2ui-agent",
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "Agent Server (Python gRPC)",
+      "detail": "LangGraph Agent — 端口 50051",
+      "type": "shell",
+      "command": "uv run a2ui-agent",
+      "options": {
+        "cwd": "${workspaceFolder}/tools/a2ui-agent"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "group": "a2ui-agent",
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "Agent Gateway (Go)",
+      "detail": "gRPC-Gateway REST 代理 — 端口 8081 → gRPC 50051",
+      "type": "shell",
+      "command": "go run . --grpc-addr localhost:50051 --http-addr localhost:8081",
+      "options": {
+        "cwd": "${workspaceFolder}/tools/a2ui-agent/gateway"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "group": "a2ui-agent",
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "Agent Frontend (Vite)",
+      "detail": "React 测试前端 — 端口 5173",
+      "type": "shell",
+      "command": "npx vite --port 5173",
+      "options": {
+        "cwd": "${workspaceFolder}/tools/a2ui-agent/frontend"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "group": "a2ui-agent",
+        "reveal": "always"
+      }
+    },
+    {
+      "label": "Agent: Start All",
+      "detail": "依次启动 MCP → Agent → Gateway → Frontend",
+      "dependsOn": [
+        "MCP Server (Go)",
+        "Agent Server (Python gRPC)",
+        "Agent Gateway (Go)",
+        "Agent Frontend (Vite)"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    }
+  ]
 }

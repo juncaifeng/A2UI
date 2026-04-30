@@ -1,0 +1,9 @@
+[submodule "reference/go-sdk"]
+	path = reference/go-sdk
+	url = https://ghfast.top/https://github.com/modelcontextprotocol/go-sdk
+[submodule "reference/mcp-specification"]
+	path = reference/mcp-specification
+	url = https://ghfast.top/https://github.com/modelcontextprotocol/specification
+[submodule "reference/agentskills"]
+	path = reference/agentskills
+	url = https://github.com/agentskills/agentskills
