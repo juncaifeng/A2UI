@@ -1,0 +1,167 @@
+// Copyright 2025 A2UI Agent Authors
+//
+// A2UI Agent Service — an AI agent that translates natural language
+// into A2UI interfaces via MCP tool calls.
+
+syntax = "proto3";
+
+package a2ui.agent.v1;
+
+option go_package = "github.com/juncaifeng/a2ui-agent/gen/go/a2ui/agent/v1";
+
+import "google/api/annotations.proto";
+import "google/protobuf/empty.proto";
+
+// AgentService exposes an LLM-powered agent that calls A2UI MCP tools
+// to assemble declarative UI from natural language.
+service AgentService {
+
+  // Chat sends a user message and returns a complete A2UI response.
+  rpc Chat(ChatRequest) returns (ChatResponse) {
+    option (google.api.http) = {
+      post: "/v1/chat"
+      body: "*"
+    };
+  }
+
+  // ChatStream sends a user message and streams back progressive events
+  // (text deltas, tool calls, rendered A2UI).
+  rpc ChatStream(ChatRequest) returns (stream StreamEvent) {
+    option (google.api.http) = {
+      post: "/v1/chat/stream"
+      body: "*"
+    };
+  }
+
+  // ListModels returns the available LLM models.
+  rpc ListModels(google.protobuf.Empty) returns (ListModelsResponse) {
+    option (google.api.http) = {
+      get: "/v1/models"
+    };
+  }
+
+  // GetSession returns the current state of a conversation session.
+  rpc GetSession(GetSessionRequest) returns (Session) {
+    option (google.api.http) = {
+      get: "/v1/sessions/{session_id}"
+    };
+  }
+
+  // DeleteSession removes a conversation session.
+  rpc DeleteSession(DeleteSessionRequest) returns (google.protobuf.Empty) {
+    option (google.api.http) = {
+      delete: "/v1/sessions/{session_id}"
+    };
+  }
+}
+
+// --- Chat ---
+
+message ChatRequest {
+  // Optional session ID for continuing a conversation.
+  // If empty, a new session is created.
+  string session_id = 1;
+  // The user's natural language message.
+  string message = 2;
+  // Optional LLM model override (e.g. "deepseek-v4-flash", "gpt-4o").
+  string model = 3;
+  // Optional surface ID. If empty, defaults to "main".
+  string surface_id = 4;
+}
+
+message ChatResponse {
+  // Session ID (new or continued).
+  string session_id = 1;
+  // The agent's conversational text reply.
+  string text = 2;
+  // Assembled A2UI messages ready for the renderer.
+  repeated A2UIMessage a2ui_messages = 3;
+}
+
+// A2UIMessage represents one A2UI protocol message (createSurface,
+// updateComponents, updateDataModel, or deleteSurface).
+message A2UIMessage {
+  // The message kind: "createSurface" | "updateComponents" |
+  // "updateDataModel" | "deleteSurface".
+  string kind = 1;
+  // Complete JSON payload compliant with A2UI v0.9 server_to_client schema.
+  string json = 2;
+}
+
+// --- Streaming ---
+
+// StreamEvent is one event in a ChatStream response.
+message StreamEvent {
+  oneof event {
+    // Incremental text from the LLM's reasoning / reply.
+    TextDelta text_delta = 1;
+    // The agent is about to call (or has called) an MCP tool.
+    ToolCallEvent tool_call = 2;
+    // Final rendered A2UI messages.
+    A2UIRenderEvent a2ui_render = 3;
+    // Something went wrong.
+    ErrorEvent error = 4;
+    // Session metadata (always sent as the first event).
+    SessionMeta session_meta = 5;
+  }
+}
+
+message SessionMeta {
+  string session_id = 1;
+  string surface_id = 2;
+}
+
+message TextDelta {
+  string text = 1;
+}
+
+message ToolCallEvent {
+  // MCP tool name (e.g. "create_surface", "create_text").
+  string tool_name = 1;
+  // JSON-serialized arguments sent to the tool.
+  string arguments_json = 2;
+  // Tool result (filled after execution).
+  string result = 3;
+  // Whether this is the start or end of the tool call.
+  bool done = 4;
+}
+
+message A2UIRenderEvent {
+  repeated A2UIMessage messages = 1;
+}
+
+message ErrorEvent {
+  string code = 1;
+  string message = 2;
+}
+
+// --- Session Management ---
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message DeleteSessionRequest {
+  string session_id = 1;
+}
+
+message Session {
+  string session_id = 1;
+  string surface_id = 2;
+  // Number of conversation turns so far.
+  int32 turn_count = 3;
+  // All A2UI messages produced in the latest render.
+  repeated A2UIMessage last_render = 4;
+}
+
+// --- Models ---
+
+message ListModelsResponse {
+  repeated ModelInfo models = 1;
+}
+
+message ModelInfo {
+  string id = 1;
+  string display_name = 2;
+  string provider = 3;
+}

@@ -1,0 +1,27 @@
+# Generated
+gen/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Go
+gateway/gateway.exe
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/package-lock.json
+frontend/screenshot*.png
+
+# Env
+.env
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
