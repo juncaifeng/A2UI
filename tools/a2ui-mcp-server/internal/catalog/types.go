@@ -79,12 +79,9 @@ func MergeCatalogs(catalogs []*Catalog) *Catalog {
 		}
 	}
 
-	// Store all catalog IDs separated by comma
+	// Use the first (primary) catalog ID; extra catalogs are supplements
 	if len(catalogIDs) > 0 {
 		merged.CatalogID = catalogIDs[0]
-		for _, id := range catalogIDs[1:] {
-			merged.CatalogID += "," + id
-		}
 	}
 
 	return merged

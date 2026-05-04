@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"regexp"
 
 	"github.com/juncaifeng/a2ui-mcp-server/internal/a2ui"
 	"github.com/juncaifeng/a2ui-mcp-server/internal/session"
@@ -14,7 +15,7 @@ import (
 
 type CreateSurfaceInput struct {
 	SurfaceID     string         `json:"surface_id" jsonschema:"Unique identifier for the UI surface"`
-	CatalogID     string         `json:"catalog_id,omitempty" jsonschema:"Catalog ID. Defaults to A2UI basic catalog."`
+	CatalogID     string         `json:"catalog_id,omitempty" jsonschema:"Catalog ID. Defaults to loaded catalog."`
 	Theme         map[string]any `json:"theme,omitempty" jsonschema:"Theme config: primaryColor, iconUrl, agentDisplayName"`
 	SendDataModel bool           `json:"send_data_model,omitempty" jsonschema:"If true, client sends data model with every action"`
 }
@@ -29,8 +30,23 @@ type DeleteSurfaceInput struct {
 	SurfaceID string `json:"surface_id" jsonschema:"Surface to delete"`
 }
 
+var surfaceIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
+
+func validateSurfaceID(id string) error {
+	if id == "" {
+		return fmt.Errorf("surface_id must not be empty")
+	}
+	if len(id) > 64 {
+		return fmt.Errorf("surface_id must be at most 64 characters")
+	}
+	if !surfaceIDPattern.MatchString(id) {
+		return fmt.Errorf("surface_id must start with a letter or digit and contain only [a-zA-Z0-9_-]")
+	}
+	return nil
+}
+
 // RegisterProtocolTools registers the 3 protocol tools (create_surface, update_data_model, delete_surface).
-func RegisterProtocolTools(server *mcp.Server, store *session.Store, builder *a2ui.Builder) {
+func RegisterProtocolTools(server *mcp.Server, store *session.Store, builder *a2ui.Builder, defaultCatalogID string) {
 	// create_surface
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "create_surface",
@@ -40,13 +56,22 @@ func RegisterProtocolTools(server *mcp.Server, store *session.Store, builder *a2
 		log.Printf("[DEBUG] create_surface HANDLER ENTERED: surface_id=%q", args.SurfaceID)
 		sessionID := getSessionID(req)
 		log.Printf("[DEBUG] create_surface sessionID=%q", sessionID)
+
+		if err := validateSurfaceID(args.SurfaceID); err != nil {
+			return errorResult(err.Error()), nil, nil
+		}
+
 		catalogID := args.CatalogID
 		if catalogID == "" {
-			catalogID = "https://a2ui.org/specification/v0_9/basic_catalog.json"
+			catalogID = defaultCatalogID
 		}
-		store.SetSurface(sessionID, args.SurfaceID, catalogID, args.Theme, args.SendDataModel)
 
-		msg, _ := builder.BuildCreateSurface(store.GetOrCreate(sessionID))
+		if err := store.SetSurface(sessionID, args.SurfaceID, catalogID, args.Theme, args.SendDataModel); err != nil {
+			return errorResult(fmt.Sprintf("Cannot create surface: %v", err)), nil, nil
+		}
+
+		sf := store.GetSurface(sessionID, args.SurfaceID)
+		msg, _ := builder.BuildCreateSurface(sf)
 		log.Printf("[DEBUG] create_surface HANDLER RETURNING OK: surface_id=%q", args.SurfaceID)
 
 		return &mcp.CallToolResult{
@@ -74,7 +99,7 @@ func RegisterProtocolTools(server *mcp.Server, store *session.Store, builder *a2
 		if path == "" {
 			path = "/"
 		}
-		store.UpdateDataModel(sessionID, path, args.Value)
+		store.UpdateDataModelOn(sessionID, args.SurfaceID, path, args.Value)
 
 		msg, _ := builder.BuildUpdateDataModel(args.SurfaceID, path, args.Value)
 
@@ -101,7 +126,7 @@ func RegisterProtocolTools(server *mcp.Server, store *session.Store, builder *a2
 		sessionID := getSessionID(req)
 
 		msg, _ := builder.BuildDeleteSurface(args.SurfaceID)
-		store.Clear(sessionID)
+		store.DeleteSurface(sessionID, args.SurfaceID)
 
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{

@@ -15,7 +15,7 @@ func NewBuilder() *Builder {
 }
 
 // BuildMessages creates the full A2UI message array for a session.
-func (b *Builder) BuildMessages(st *session.State) ([]json.RawMessage, error) {
+func (b *Builder) BuildMessages(st *session.SurfaceState) ([]json.RawMessage, error) {
 	var messages []json.RawMessage
 
 	// 1. createSurface
@@ -76,7 +76,7 @@ func (b *Builder) BuildMessages(st *session.State) ([]json.RawMessage, error) {
 }
 
 // BuildCreateSurface creates just the createSurface message.
-func (b *Builder) BuildCreateSurface(st *session.State) (json.RawMessage, error) {
+func (b *Builder) BuildCreateSurface(st *session.SurfaceState) (json.RawMessage, error) {
 	catalogID := st.CatalogID
 	if catalogID == "" {
 		catalogID = "https://a2ui.org/specification/v0_9/basic_catalog.json"
