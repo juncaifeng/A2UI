@@ -203,11 +203,37 @@ The MCP server auto-discovers catalog files from the binary location. If the bin
 
 If you want markdown rendering inside A2UI components (Text with `variant: "markdown"`), wrap your surfaces in `<MarkdownContext.Provider value={renderMarkdown}>`.
 
+### 11. `render_ui` Returns `EmbeddedResource`, Not Plain Text
+
+The `render_ui` tool returns the A2UI JSON array inside an `EmbeddedResource` (MIME type `application/json+a2ui`), not in a standard `TextContent`. The MCP tool result contains two content blocks:
+
+```
+Content[0]: TextContent    → "Rendered N components..." (summary, NOT the data)
+Content[1]: EmbeddedResource → { uri: "a2ui://...", mimeType: "application/json+a2ui", text: "[...actual JSON...]" }
+```
+
+**The problem**: Default MCP text extractors (e.g., LangChain's `block.text`) may summarize `EmbeddedResource` as `[MCP returned embedded resource (application/json+a2ui).]` instead of returning the raw JSON. Your frontend `JSON.parse(m.json)` will then fail with a syntax error.
+
+**Fix**: When extracting A2UI messages from tool results, you **must** specifically check for `EmbeddedResource` content blocks and read their `.text` field. Do not rely on generic text extraction:
+
+```python
+# ✅ Correct: handle EmbeddedResource explicitly
+for block in tool_result.content:
+    if hasattr(block, 'text') and isinstance(block.text, str):
+        text = block.text
+        if text.startswith('[') or text.startswith('{'):
+            parsed = json.loads(text)
+            # ... extract A2UI messages
+```
+
+The `TextContent` summary starts with `"Rendered"` — it will never parse as valid A2UI JSON. Only the `EmbeddedResource.text` contains the actual data.
+
 ## Verification Checklist
 
 - [ ] MCP server running at `http://localhost:8080/mcp` (not `/`)
 - [ ] Agent connects to MCP and loads all tools (should be ~18-22 tools)
 - [ ] Agent follows create_surface -> create_* -> render_ui workflow
+- [ ] Agent extracts A2UI JSON from `EmbeddedResource.text`, not from `TextContent` summary
 - [ ] Frontend wraps surfaces in `<MarkdownContext.Provider>`
 - [ ] `MessageProcessor` created once with `useMemo`
 - [ ] Action handler uses `useRef` pattern
