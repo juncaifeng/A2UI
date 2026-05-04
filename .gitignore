@@ -8,6 +8,9 @@ dist
 *.pyc
 .angular/
 
+# Build releases
+releases/
+
 # MkDocs build output
 site/
 

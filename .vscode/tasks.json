@@ -16,9 +16,9 @@
 
     {
       "label": "Build: MCP Server (Go)",
-      "detail": "编译 a2ui-mcp-server",
+      "detail": "编译 a2ui-mcp-server → releases/",
       "type": "shell",
-      "command": "go build -o a2ui-mcp-server.exe .",
+      "command": "mkdir -p ${workspaceFolder}/releases && go build -o ${workspaceFolder}/releases/a2ui-mcp-server.exe .",
       "options": {
         "cwd": "${workspaceFolder}/tools/a2ui-mcp-server"
       },
@@ -30,9 +30,9 @@
     },
     {
       "label": "Build: Agent Gateway (Go)",
-      "detail": "编译 grpc-gateway",
+      "detail": "编译 grpc-gateway → releases/",
       "type": "shell",
-      "command": "go build -o gateway.exe .",
+      "command": "mkdir -p ${workspaceFolder}/releases && go build -o ${workspaceFolder}/releases/a2ui-gateway.exe .",
       "options": {
         "cwd": "${workspaceFolder}/tools/a2ui-agent/gateway"
       },
@@ -67,7 +67,7 @@
       "label": "MCP Server (Go)",
       "detail": "A2UI MCP Server — 端口 8080",
       "type": "shell",
-      "command": "go run . --addr localhost:8080 --spec ${workspaceFolder}/specification/v0_9/json",
+      "command": "go run . --addr 0.0.0.0:8080 --spec ${workspaceFolder}/specification/v0_9/json",
       "options": {
         "cwd": "${workspaceFolder}/tools/a2ui-mcp-server"
       },
